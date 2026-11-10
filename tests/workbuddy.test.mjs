@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import registerWorkBuddy, { SIDEBAR_PATH } from '../workbuddy.js'
+import registerWorkBuddy, { SIDEBAR_PATH, registerPopup } from '../workbuddy.js'
+import { Readable } from 'node:stream'
 
 function harness(read, rejection) {
   let route
@@ -11,6 +12,39 @@ function harness(read, rejection) {
     return { status, headers, body }
   } }
 }
+function popupHarness(options, rejection) {
+  let route
+  registerPopup({ webServer: { register(r) { route = r; return () => {} } }, connection: { requestRejection: () => rejection } }, options)
+  return async (body = '{}', method = 'POST') => {
+    const req = Readable.from([Buffer.from(body)]); req.method = method
+    let status, value
+    await route.handler(req, { writeHead(s) { status = s }, end(b) { value = JSON.parse(b) } })
+    return { status, value }
+  }
+}
+test('popup authentication, methods and bounded input prevent external actions', async () => {
+  let calls = 0
+  const options = { open: async () => { calls++; return { ok: true } } }
+  assert.equal((await popupHarness(options, 401)()).status, 401)
+  assert.equal((await popupHarness(options)('{}', 'GET')).status, 405)
+  assert.equal((await popupHarness(options)('invalid')).status, 400)
+  assert.equal((await popupHarness(options)('x'.repeat(16385))).status, 400)
+  assert.equal(calls, 0)
+})
+test('popup is serialized and success requires attach completion', async () => {
+  let finish, attached = 0
+  const result = { ok: true, window: '123', pid: 42, title: 'target' }
+  const send = popupHarness({ open: () => new Promise(resolve => { finish = resolve }), attached: async () => { attached++ } })
+  const first = send()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal((await send()).status, 409)
+  finish(result)
+  assert.deepEqual((await first).value, result)
+  assert.equal(attached, 1)
+  const fail = popupHarness({ open: async () => result, attached: async () => { throw new Error('attach failed') } })
+  assert.match((await fail()).value.error, /attach failed/)
+})
+
 const snapshot = { ok: true, connected: true, scope: 'visible-sidebar', groups: [{ name: 'workspace', conversations: [{ key: 'opaque:0', title: 'visible title' }] }] }
 test('sidebar route guards requests before reading UI and allows GET only', async () => {
   let calls = 0

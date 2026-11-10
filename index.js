@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import registerWorkbench from './workbench.js'
-import registerWorkBuddy from './workbuddy.js'
+import registerWorkBuddy, { registerPopup } from './workbuddy.js'
 
 export const name = 'dsh-agent-dock'
 export const inject = ['webServer', 'connection']
@@ -159,7 +159,7 @@ export function apply(ctx) {
   ctx.effect(() => {
     let configPromise = loadConfig()
     const guard = (req, res) => { const rejection = ctx.connection.requestRejection(req); if (rejection !== undefined) { json(res, rejection, { error: 'Access denied' }); return false } return true }
-    const routes = [registerWorkbench(ctx), registerWorkBuddy(ctx)]
+    const routes = [registerWorkbench(ctx), registerWorkBuddy(ctx), registerPopup(ctx)]
     routes.push(ctx.webServer.register({ kind: 'exact', path: '/api/agent-dock/workbuddy-icon', handler: async (req, res) => { if (!guard(req, res)) return; if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' }); try { json(res, 200, await readFile(path.join(root, 'workbuddy.svg')), 'image/svg+xml') } catch { json(res, 500, { error: 'Icon unavailable' }) } } }))
     const register = (route, method, handler) => routes.push(ctx.webServer.register({ kind: 'exact', path: `/api/agent-dock/${route}`, handler: async (req, res) => { if (!guard(req, res)) return; if (req.method !== method) return json(res, 405, { error: 'Method not allowed' }); try { await handler(req, res) } catch (e) { json(res, 400, { ok: false, error: e.message }) } } }))
     register('state', 'GET', async (_req, res) => { const c = await configPromise; json(res, 200, await inspect(c)) })

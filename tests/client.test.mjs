@@ -31,7 +31,13 @@ async function setup(t, sessionOptions = {}) {
     document: { createElement: element, body: element(), querySelector: selector => { assert.equal(selector, '[data-slot="sidebar.workspaces"]'); return anchor }, head: { appendChild() {} } },
     fetch: async (url, options) => {
       calls.push({ url, method: options.method })
-      assert.ok(['/api/agent-dock/workbench', '/api/agent-dock/workbuddy/sidebar'].includes(url), 'desktop flows must never call Android/launch/native-open routes')
+      assert.ok(['/api/agent-dock/workbench', '/api/agent-dock/workbuddy/sidebar', '/api/agent-dock/workbuddy/open'].includes(url), 'desktop flows must never call Android/launch/native-open routes')
+      if (url === '/api/agent-dock/workbuddy/open') {
+        assert.equal(options.method, 'POST')
+        const request = JSON.parse(options.body)
+        const value = sessionOptions.open ? await sessionOptions.open(request) : { ok: true, window: '123', pid: 42, title: request.title }
+        return { ok: !value.error, status: value.error ? 400 : 200, json: async () => value }
+      }
       if (url === '/api/agent-dock/workbuddy/sidebar') {
         assert.equal(options.method, 'GET')
         const value = sessionOptions.sidebar ? await sessionOptions.sidebar() : { ok: true, connected: true, window: 'WorkBuddy', scope: 'visible-sidebar', groups: [{ name: '最近', conversations: [{ key: 'native-one', title: '真实对话' }] }], fetchedAt: '2026-11-09T00:00:00Z' }
@@ -261,14 +267,16 @@ test('real WorkBuddy reads require explicit actions; groups and duplicate titles
   const root = app.slots.find(s => s.meta.key === app.selected()).render()
   const previewElement = app.render(root.type, root.props).tree
   const preview = app.render(previewElement.type, previewElement.props).tree
-  assert.match(text(preview), /尚未打开|原生小窗打开与跟随/)
+  assert.match(text(preview), /独立窗口中打开/)
   const list = nodes(preview).find(n => n.props['data-agent-dock'] === undefined && typeof n.type === 'function' && n.type.name === 'RealSidebarList')
   const tree = app.render(list.type, list.props).tree
   assert.match(text(tree), /仅原软件当前展开且可见的列表/)
   assert.match(text(tree), /项目.*同名同名.*最近.*其他/)
   const duplicates = nodes(tree).filter(n => n.type === 'button' && text(n) === '同名')
   assert.deepEqual(duplicates.map(n => n.props.key), ['first', 'second'])
-  duplicates[1].props.onClick()
+  await duplicates[1].props.onClick()
+  assert.equal(app.calls.filter(c => c.url.endsWith('/workbuddy/open')).length, 1)
+  assert.equal(app.model.snapshot().popup.opened, true)
   assert.equal(app.model.snapshot().selectedReal.workbuddy.key, 'second')
   assert.equal(app.model.snapshot().selectedReal.workbuddy.group, '项目')
   assert.equal(reads(), 1, 'selecting metadata does not open or reread software')

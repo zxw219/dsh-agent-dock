@@ -109,8 +109,8 @@ window.__ModuleLoader__.load({ id: 'dsh-agent-dock', factory(require) {
       return h('main', { className: 'adk page', 'data-agent-dock': 'preview' },
         h('header', { className: 'row' }, h(Icon, { value: agentIcon(agent), healthy: connectionHealthy(agent, state) }), h('h2', { className: 'grow' }, agent.name), button('管理页', model.home), button('返回 DSH', model.back)),
         h(RealSidebarList, { model, agent, state }),
-        selected && h('div', { className: 'notice', 'data-agent-dock': 'real-selection', style: { marginTop: 18 } }, h('strong', null, selected.title), h('p', { className: 'muted' }, selected.group), h('p', null, '已选择真实列表条目，尚未打开原软件对话小窗。'), button('取消选择', () => model.selectReal(agentId, null))),
-        h('p', { className: 'muted' }, '此处只读取列表和准备选择；原生小窗打开与跟随将在后续接入。'), button('查看本地演示', () => model.showDemo(agentId)))
+        selected && h('div', { className: 'notice', 'data-agent-dock': 'real-selection', style: { marginTop: 18 } }, h('strong', null, selected.title), h('p', { className: 'muted' }, selected.group), h('p', { role: state.popup?.error ? 'alert' : 'status' }, state.popup?.opening ? '正在通过 WorkBuddy 原生菜单打开…' : state.popup?.error || (state.popup?.opened ? '已核对并打开原生对话小窗。' : '已选择真实列表条目。')), button('取消选择', () => model.selectReal(agentId, null))),
+        h('p', { className: 'muted' }, '点击真实条目将操作 WorkBuddy 自己的“在独立窗口中打开”菜单。窗口贴合与显隐正在接入。'), button('查看本地演示', () => model.showDemo(agentId)))
     }
     return h('main', { className: 'adk preview', 'data-agent-dock': 'preview' }, h('header', { className: 'row previewhead' }, h(Icon, { value: agentIcon(agent), healthy: connectionHealthy(agent, state) }), h('div', { className: 'grow' }, h('h2', { style: { margin: 0 } }, conversation?.title || agent.name), h('small', { className: 'muted' }, agent.name, ' · 演示对话')), isWorkBuddy(agent) && button('查看真实列表', () => model.openAgent(agentId)), button('管理页', model.home), button('返回 DSH', model.back)), h('div', { className: 'previewbody' }, conversation ? h('div', null, h(Icon, { value: agentIcon(agent), healthy: connectionHealthy(agent, state), size: 44 }), h('h2', { style: { marginTop: 18 } }, '已选择这条演示对话'), h('p', { className: 'muted' }, conversation.title), h('div', { className: 'previewbox' }, h('strong', null, '这里预留给原软件的对话小窗'), h('p', { className: 'muted' }, '当前只验证选择、切换和返回流程，没有打开外部窗口，也不会发送消息。')), h('p', { className: 'muted' }, '切回 DSH 后按设置：', agent.windowPolicy === 'hide' ? '隐藏小窗，下次恢复' : '仅关闭对话小窗', '（连接后生效）'), button('取消选择', () => model.select(agent.id, null))) : h('div', null, h('h2', null, `选择 ${agent.name} 的演示对话`), h('p', { className: 'muted' }, '可以点击左侧列表，也可以在下面选择。'), h('input', { className: 'input', 'aria-label': '搜索演示对话', placeholder: '搜索演示对话', value: query, onChange: e => setQuery(e.target.value) }), ...model.conversations(agent, query).map(c => h('div', { key: c.id, style: { marginTop: 10 } }, button(`${c.pinned ? '★ ' : ''}${c.title}`, () => model.select(agent.id, c.id)))), !agent.conversations.length && h('div', { className: 'notice' }, '还没有演示条目。', ' ', button('去设置里添加', model.home)))), h('footer', { className: 'foot muted' }, '本地交互预览 · 不读取、同步或修改原软件的真实对话。'))
   }
@@ -138,7 +138,16 @@ window.__ModuleLoader__.load({ id: 'dsh-agent-dock', factory(require) {
         back: () => { clearWorkspace(); ctx.layout.selectPanel(null) },
         select: (id, conversationId) => { model.showDemo(id); emit({ selected: { ...state.selected, [id]: conversationId } }) },
         showDemo: id => { if (!state.agents.some(a => a.id === id && a.enabled)) return; emit({ previewModes: { ...state.previewModes, [id]: 'demo' } }); ctx.layout.selectPanel(panelKey(id)); activateWorkspace(id) },
-        selectReal: (id, item) => { if (!state.agents.some(a => a.id === id && a.enabled && isWorkBuddy(a))) return; emit({ selectedReal: { ...state.selectedReal, [id]: item }, previewModes: { ...state.previewModes, [id]: 'real' } }); ctx.layout.selectPanel(panelKey(id)); activateWorkspace(id) },
+        selectReal: async (id, item) => {
+          if (!state.agents.some(a => a.id === id && a.enabled && isWorkBuddy(a)) || state.popup?.opening) return
+          emit({ selectedReal: { ...state.selectedReal, [id]: item }, previewModes: { ...state.previewModes, [id]: 'real' }, popup: item ? { opening: true, error: '' } : null })
+          ctx.layout.selectPanel(panelKey(id)); activateWorkspace(id)
+          if (!item) return
+          try {
+            const result = await api('workbuddy/open', 'POST', { window: state.realSidebars[id]?.window, ...item })
+            if (alive && state.selectedReal[id] === item) emit({ popup: { opening: false, opened: true, title: result.title, error: '' } })
+          } catch (error) { if (alive && state.selectedReal[id] === item) emit({ popup: { opening: false, opened: false, error: error.message } }) }
+        },
         toggleWorkspace: id => { const expanded = !state.expanded[id]; emit({ expanded: { ...state.expanded, [id]: expanded } }); if (expanded) return model.refreshReal(id) },
         openAgent: id => { const agent = state.agents.find(a => a.id === id && a.enabled); if (!agent) return; emit({ previewModes: { ...state.previewModes, [id]: 'real' } }); ctx.layout.selectPanel(panelKey(id)); activateWorkspace(id); if (isWorkBuddy(agent)) return model.refreshReal(id) },
         refreshReal: id => {
