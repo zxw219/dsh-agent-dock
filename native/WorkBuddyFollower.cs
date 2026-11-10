@@ -166,7 +166,9 @@ public static class WorkBuddyFollower {
     if(IsIconic(target.Window)) throw new Exception("Popup minimized; following released");
     if(!host.Alive()) throw new Exception("DSH window destroyed or identity changed");
     if(!view.Visible||!IsWindowVisible(host.Window)||IsIconic(host.Window)||!RelatedForeground()) { Visibility(false); lastForeground=IntPtr.Zero; return; }
-    if(!IsWindow(renderer)||Class(renderer)!="Chrome_RenderWidgetHostHWND"||GetAncestor(renderer,2)!=host.Window) throw new Exception("DSH renderer changed; fresh viewport required");
+    // Electron can recreate this child during minimize/restore. Hide until the next
+    // viewport resolves and verifies the new renderer; retain the popup identity.
+    if(!IsWindow(renderer)||Class(renderer)!="Chrome_RenderWidgetHostHWND"||GetAncestor(renderer,2)!=host.Window) { Visibility(false); return; }
     RECT cr; if(!GetClientRect(renderer,out cr)) throw new Exception("Renderer client rectangle unavailable");
     // Native movement is followed without JS; a resize requires new frontend geometry.
     if(Math.Abs(cr.Width-view.IW*view.Dpr)>4||Math.Abs(cr.Height-view.IH*view.Dpr)>4) { Visibility(false); return; }
