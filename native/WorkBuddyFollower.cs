@@ -218,12 +218,12 @@ public static class WorkBuddyFollower {
         while(queue.TryDequeue(out line)) {
           string id=null;
           try { using(var doc=JsonDocument.Parse(line)) { var e=doc.RootElement; id=e.GetProperty("id").GetString(); object result=Command(e); Output(new{id=id,ok=true,result=result}); } }
-          catch(Exception ex) { string error=ex.Message; try { Restore(); } catch(Exception restore) { error+="; restore: "+restore.Message; } Output(new{id=id,ok=false,error=error}); }
+          catch(Exception ex) { string error=ex.Message; try { RestoreAll(); } catch(Exception restore) { error+="; restore: "+restore.Message; } Output(new{id=id,ok=false,error=error}); }
         }
         if(deferredError!=null) throw new Exception(deferredError);
         if(eof) break;
-        if(target!=null&&Now()-beat>8000) { object restored=RestoreAll(); Output(new{ @event="released",reason="heartbeat-timeout",result=restored }); }
-        if(dirty&&target!=null) { dirty=false; try { Apply(); } catch(Exception ex) { string error=ex.Message; try{Restore();}catch(Exception restore){error+="; restore: "+restore.Message;} Output(new{@event="error",error=error}); } }
+        if((target!=null||parked.Count>0)&&Now()-beat>8000) { object restored=RestoreAll(); Output(new{ @event="released",reason="heartbeat-timeout",result=restored }); }
+        if(dirty&&target!=null) { dirty=false; try { Apply(); } catch(Exception ex) { string error=ex.Message; try{RestoreAll();}catch(Exception restore){error+="; restore: "+restore.Message;} Output(new{@event="error",error=error}); } }
         Thread.Sleep(20);
       }
     } finally { try { RestoreAll(); } catch(Exception ex) { Console.Error.WriteLine("Restore failed: "+ex.Message); } ClearHooks(); }
