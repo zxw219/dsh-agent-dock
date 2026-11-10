@@ -93,6 +93,15 @@ test('failed spawn closes recovery fence and permits retry', async () => {
   await assert.rejects(h.follower.dispose(), /exited/)
 })
 
+test('invalid native envelope rejects pending operation without crashing host', async () => {
+  const h = harness({ auto: false })
+  const attaching = h.follower.attach(target); await tick()
+  h.children[0].stdout.write('null\n')
+  await assert.rejects(attaching, /Invalid follower response envelope/)
+  h.children[0].emit('close', 1, null)
+  await assert.rejects(h.follower.dispose(), /Invalid follower response envelope/)
+})
+
 test('invalid identity is rejected before worker spawn', async () => {
   const h = harness()
   await assert.rejects(h.follower.attach({ ...target, window: 'not-hwnd' }), /Invalid/)

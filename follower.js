@@ -49,12 +49,14 @@ export function createFollower(options = {}) {
         if (!line) continue
         let response
         try { response = JSON.parse(line) } catch { fail(w, new Error('Invalid follower response')); return }
+        if (!response || typeof response !== 'object' || Array.isArray(response)) { fail(w, new Error('Invalid follower response envelope')); return }
         if (response.event) {
           lastError = response.error ? new Error(response.error) : null
           if (response.event === 'error' || response.event === 'released') stopHeartbeat()
           options.onEvent?.(response)
           continue
         }
+        if (typeof response.id !== 'string' || typeof response.ok !== 'boolean') { fail(w, new Error('Invalid follower response envelope')); return }
         const pending = w.pending.get(response.id)
         if (!pending) continue
         w.pending.delete(response.id); clearTimeout(pending.timer)
