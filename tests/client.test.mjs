@@ -25,10 +25,11 @@ async function setup(t, sessionOptions = {}) {
   const history = element(); list.appendChild(history); anchor.appendChild(list)
   anchor.querySelector = () => list
   const dom = { history, anchor: () => list, replaceAnchor() { anchor = element(); list = element(); anchor.appendChild(list); anchor.querySelector = () => list; observerCallback?.() }, notify: () => observerCallback?.(), disconnected: () => disconnected }
+  const visibilityListeners = new Set(), resizeListeners = new Set()
   const context = {
-    window: { __ModuleLoader__: { load: ({ factory }) => { plugin = factory(name => name === 'react-dom' ? { createPortal: (child, target) => ({ child, target }) } : React) } } },
+    window: { devicePixelRatio: 1, screenX: 0, screenY: 0, outerWidth: 1600, outerHeight: 1000, innerWidth: 1600, innerHeight: 960, addEventListener: (_name, fn) => resizeListeners.add(fn), removeEventListener: (_name, fn) => resizeListeners.delete(fn), __ModuleLoader__: { load: ({ factory }) => { plugin = factory(name => name === 'react-dom' ? { createPortal: (child, target) => ({ child, target }) } : React) } } },
     MutationObserver: class { constructor(callback) { observerCallback = callback } observe() {} disconnect() { disconnected = true } },
-    document: { createElement: element, body: element(), querySelector: selector => { assert.equal(selector, '[data-slot="sidebar.workspaces"]'); return anchor }, head: { appendChild() {} } },
+    document: { hidden: true, addEventListener: (_name, fn) => visibilityListeners.add(fn), removeEventListener: (_name, fn) => visibilityListeners.delete(fn), createElement: element, body: element(), querySelector: selector => { assert.equal(selector, '[data-slot="sidebar.workspaces"]'); return anchor }, head: { appendChild() {} } },
     fetch: async (url, options) => {
       calls.push({ url, method: options.method })
       assert.ok(['/api/agent-dock/workbench', '/api/agent-dock/workbuddy/sidebar', '/api/agent-dock/workbuddy/open', '/api/agent-dock/workbuddy/viewport'].includes(url), 'desktop flows must never call Android/launch/native-open routes')
@@ -71,7 +72,7 @@ async function setup(t, sessionOptions = {}) {
   const { model } = home.render().props
   await model.reload()
   const render = (component, props, reset = true) => { if (reset) hooks = []; cursor = 0; pendingEffects = []; const tree = component(props); return { tree, effects: () => pendingEffects.map(fn => fn()) } }
-  return { slots, calls, sessionCalls, model, store, home, render, dom, dispose: () => effects.splice(0).reverse().forEach(fn => fn?.()), selected: () => selected }
+  return { slots, calls, sessionCalls, model, store, home, render, dom, visibilityListeners, dispose: () => effects.splice(0).reverse().forEach(fn => fn?.()), selected: () => selected }
 }
 function nodes(tree) { return tree && typeof tree === 'object' ? [tree, ...tree.props.children.flatMap(nodes)] : [] }
 function text(tree) { return typeof tree === 'string' || typeof tree === 'number' ? String(tree) : tree?.props?.children.map(text).join('') || '' }
@@ -110,6 +111,30 @@ test('late popup open after returning to DSH is hidden with its own lease', asyn
   assert.equal(app.selected(), null)
   assert.ok(app.calls.some(c => c.url.endsWith('/viewport')))
   assert.ok(app.model.snapshot().popup.lease)
+})
+
+test('native viewport remains active when Chromium reports occlusion; panel leave still hides it', async t => {
+  const app = await setup(t)
+  await app.model.saveAgent(agent())
+  await app.model.refreshReal('workbuddy')
+  await app.model.selectReal('workbuddy', { key: 'native-one', title: '真实对话', group: '最近' })
+  const lease = app.model.snapshot().popup.lease, sent = []
+  const main = app.slots.find(s => s.meta.key === app.selected()).render()
+  const root = app.render(main.type, main.props).tree
+  const preview = app.render(root.type, root.props).tree
+  const component = nodes(preview).find(n => n.type?.name === 'PopupViewport')
+  assert.ok(component)
+  const model = { ...app.model, popupViewport: async value => sent.push(value) }
+  let view = app.render(component.type, { model, lease })
+  view.tree.props.ref({ getBoundingClientRect: () => ({ x: 400, y: 100, width: 1000, height: 800 }) })
+  view = app.render(component.type, { model, lease }, false)
+  const cleanups = view.effects()
+  try {
+    assert.equal(sent.at(-1).visible, true, 'document.hidden must not hide a related native window')
+    app.model.back()
+    for (const refresh of app.visibilityListeners) refresh()
+    assert.equal(sent.at(-1).visible, false)
+  } finally { cleanups.forEach(fn => fn?.()) }
 })
 
 test('popup activity follows selected panel and ignores errors from an old lease', async t => {
