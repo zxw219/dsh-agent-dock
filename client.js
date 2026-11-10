@@ -108,7 +108,7 @@ window.__ModuleLoader__.load({ id: 'dsh-agent-dock', factory(require) {
       let live = true, tail = Promise.resolve(), last = null
       const geometry = visible => { const r = node.getBoundingClientRect(); return { rect: { x: r.x, y: r.y, width: r.width, height: r.height }, devicePixelRatio: window.devicePixelRatio, visible, screen: { x: window.screenX, y: window.screenY, width: window.outerWidth, height: window.outerHeight, innerWidth: window.innerWidth, innerHeight: window.innerHeight } } }
       const send = visible => { const value = geometry(visible); last = value; tail = model.popupViewport(value, lease).catch(error => { if (live) model.popupError(error.message, lease) }); return tail }
-      const refresh = () => { if (live) send(!document.hidden && model.popupActive(lease)) }
+      const refresh = () => { if (live) send(model.popupActive(lease)) }
       refresh(); const timer = setInterval(refresh, 1500)
       window.addEventListener('resize', refresh); document.addEventListener('visibilitychange', refresh)
       return () => { live = false; clearInterval(timer); window.removeEventListener('resize', refresh); document.removeEventListener('visibilitychange', refresh); if (last) { last = { ...last, visible: false }; model.popupViewport(last, lease).catch(() => {}) } }

@@ -139,7 +139,7 @@ public static class WorkBuddyFollower {
     },IntPtr.Zero);
     if(candidates.Count!=1) throw new Exception("Cannot uniquely identify DSH window from screen geometry");
     host=candidates[0];
-    if(view==null&&GetForegroundWindow()==target.Window) {
+    if(view==null&&OpeningForeground()) {
       SetForegroundWindow(host.Window);
       // Chromium may expose its native renderer only after its occluded host repaints.
       for(int attempt=0;attempt<10;attempt++) { MSG m; while(PeekMessage(out m,IntPtr.Zero,0,0,1)) { TranslateMessage(ref m); DispatchMessage(ref m); } Thread.Sleep(30); }
@@ -154,6 +154,16 @@ public static class WorkBuddyFollower {
     ClearHooks(); Install((uint)host.Pid);
     IntPtr fg=SetWinEventHook(3,3,IntPtr.Zero,eventProc,0,0,0);
     if(fg==IntPtr.Zero) throw new Exception("Foreground WinEventHook failed"); hooks.Add(fg);
+  }
+  static bool OpeningForeground() {
+    IntPtr foreground=GetForegroundWindow();
+    if(foreground==target.Window) return true;
+    // The verified native context-menu operation can leave the main WorkBuddy
+    // window foreground instead of its popup. Only accept the exact target PID.
+    uint pid; GetWindowThreadProcessId(foreground,out pid);
+    if(pid!=(uint)target.Pid||!IsWindowVisible(foreground)||IsIconic(foreground)) return false;
+    var title=new StringBuilder(256); GetWindowText(foreground,title,title.Capacity);
+    return title.ToString()=="WorkBuddy";
   }
   static bool RelatedForeground() {
     IntPtr fg=GetForegroundWindow(); if(fg==IntPtr.Zero) return false;
@@ -203,7 +213,7 @@ public static class WorkBuddyFollower {
       ResolveHost(next);
       // After the user-requested popup open, return focus to the verified DSH host
       // once, only while that exact popup is still foreground. Never steal from other apps.
-      if(view==null&&GetForegroundWindow()==target.Window) SetForegroundWindow(host.Window);
+      if(view==null&&OpeningForeground()) SetForegroundWindow(host.Window);
       view=next; Apply();
       return new {attached=true,visible=IsWindowVisible(target.Window),window=target.Window.ToInt64().ToString()};
     }
