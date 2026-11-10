@@ -64,8 +64,9 @@ export function registerPopup(ctx, { open = openConversation, attached = async (
       let size = 0; const chunks = []
       for await (const chunk of req) { size += chunk.length; if (size > 16384) throw new Error('请求过大。'); chunks.push(chunk) }
       const request = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      if (request.lease !== undefined && (typeof request.lease !== 'string' || !/^[\w-]{1,120}$/.test(request.lease))) throw new Error('小窗请求标记无效。')
       const result = await open(request)
-      await attached(result)
+      await attached(result, request)
       reply(200, result)
     } catch (error) { reply(400, { ok: false, error: error.message }) }
     finally { busy = false }

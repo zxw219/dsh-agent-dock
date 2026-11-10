@@ -101,16 +101,32 @@ window.__ModuleLoader__.load({ id: 'dsh-agent-dock', factory(require) {
       real?.connected && h('div', null, h('p', { className: 'muted' }, real.window, ' · ', real.fetchedAt), ...real.groups.map((group, index) => h('section', { key: index }, h('h3', null, group.name), ...group.conversations.map(item => h('button', { type: 'button', className: 'agent-conversation-row', key: item.key, title: item.title, 'aria-current': state.selectedReal[agent.id]?.key === item.key && state.selectedReal[agent.id]?.group === group.name ? 'page' : undefined, onClick: () => model.selectReal(agent.id, { key: item.key, title: item.title, group: group.name }) }, item.title)))), !real.groups.some(group => group.conversations.length) && h('p', { className: 'muted' }, '当前展开可见的侧栏没有对话条目。')))
   }
 
+  function PopupViewport({ model, lease }) {
+    const [node, setNode] = React.useState(null)
+    React.useEffect(() => {
+      if (!node) return
+      let live = true, tail = Promise.resolve(), last = null
+      const geometry = visible => { const r = node.getBoundingClientRect(); return { rect: { x: r.x, y: r.y, width: r.width, height: r.height }, devicePixelRatio: window.devicePixelRatio, visible, screen: { x: window.screenX, y: window.screenY, width: window.outerWidth, height: window.outerHeight, innerWidth: window.innerWidth, innerHeight: window.innerHeight } } }
+      const send = visible => { const value = geometry(visible); last = value; tail = model.popupViewport(value, lease).catch(error => { if (live) model.popupError(error.message, lease) }); return tail }
+      const refresh = () => { if (live) send(!document.hidden && model.popupActive(lease)) }
+      refresh(); const timer = setInterval(refresh, 1500)
+      window.addEventListener('resize', refresh); document.addEventListener('visibilitychange', refresh)
+      return () => { live = false; clearInterval(timer); window.removeEventListener('resize', refresh); document.removeEventListener('visibilitychange', refresh); if (last) { last = { ...last, visible: false }; model.popupViewport(last, lease).catch(() => {}) } }
+    }, [node, lease])
+    return h('div', { ref: setNode, 'data-agent-dock': 'native-viewport', style: { flex: 1, minHeight: 300, marginTop: 12, border: '1px solid var(--ad-border)' } }, 'WorkBuddy 原生对话窗口区域')
+  }
+
   function ConversationPreview({ model, agentId }) {
     const state = useModel(model), agent = state.agents.find(a => a.id === agentId && a.enabled), conversation = agent?.conversations.find(c => c.id === state.selected[agentId]), [query, setQuery] = React.useState('')
     if (!agent) return h('div', { className: 'adk page' }, h('p', null, '这个入口已停用或移除。'), button('返回管理页', model.home))
     if (isWorkBuddy(agent) && state.previewModes[agentId] !== 'demo') {
       const selected = state.selectedReal[agentId]
-      return h('main', { className: 'adk page', 'data-agent-dock': 'preview' },
+      return h('main', { className: 'adk page', 'data-agent-dock': 'preview', style: { display: 'flex', flexDirection: 'column', overflow: 'hidden' } },
         h('header', { className: 'row' }, h(Icon, { value: agentIcon(agent), healthy: connectionHealthy(agent, state) }), h('h2', { className: 'grow' }, agent.name), button('管理页', model.home), button('返回 DSH', model.back)),
-        h(RealSidebarList, { model, agent, state }),
+        !state.popup?.opened && h(RealSidebarList, { model, agent, state }),
+        state.popup?.opened && state.popup.agentId === agentId && h(PopupViewport, { key: state.popup.lease, model, lease: state.popup.lease }),
         selected && h('div', { className: 'notice', 'data-agent-dock': 'real-selection', style: { marginTop: 18 } }, h('strong', null, selected.title), h('p', { className: 'muted' }, selected.group), h('p', { role: state.popup?.error ? 'alert' : 'status' }, state.popup?.opening ? '正在通过 WorkBuddy 原生菜单打开…' : state.popup?.error || (state.popup?.opened ? '已核对并打开原生对话小窗。' : '已选择真实列表条目。')), button('取消选择', () => model.selectReal(agentId, null))),
-        h('p', { className: 'muted' }, '点击真实条目将操作 WorkBuddy 自己的“在独立窗口中打开”菜单。窗口贴合与显隐正在接入。'), button('查看本地演示', () => model.showDemo(agentId)))
+        h('p', { className: 'muted' }, '点击真实条目将操作 WorkBuddy 自己的“在独立窗口中打开”菜单。小窗跟随右侧区域；切回 DSH 时隐藏，返回时恢复。'), button('查看本地演示', () => model.showDemo(agentId)))
     }
     return h('main', { className: 'adk preview', 'data-agent-dock': 'preview' }, h('header', { className: 'row previewhead' }, h(Icon, { value: agentIcon(agent), healthy: connectionHealthy(agent, state) }), h('div', { className: 'grow' }, h('h2', { style: { margin: 0 } }, conversation?.title || agent.name), h('small', { className: 'muted' }, agent.name, ' · 演示对话')), isWorkBuddy(agent) && button('查看真实列表', () => model.openAgent(agentId)), button('管理页', model.home), button('返回 DSH', model.back)), h('div', { className: 'previewbody' }, conversation ? h('div', null, h(Icon, { value: agentIcon(agent), healthy: connectionHealthy(agent, state), size: 44 }), h('h2', { style: { marginTop: 18 } }, '已选择这条演示对话'), h('p', { className: 'muted' }, conversation.title), h('div', { className: 'previewbox' }, h('strong', null, '这里预留给原软件的对话小窗'), h('p', { className: 'muted' }, '当前只验证选择、切换和返回流程，没有打开外部窗口，也不会发送消息。')), h('p', { className: 'muted' }, '切回 DSH 后按设置：', agent.windowPolicy === 'hide' ? '隐藏小窗，下次恢复' : '仅关闭对话小窗', '（连接后生效）'), button('取消选择', () => model.select(agent.id, null))) : h('div', null, h('h2', null, `选择 ${agent.name} 的演示对话`), h('p', { className: 'muted' }, '可以点击左侧列表，也可以在下面选择。'), h('input', { className: 'input', 'aria-label': '搜索演示对话', placeholder: '搜索演示对话', value: query, onChange: e => setQuery(e.target.value) }), ...model.conversations(agent, query).map(c => h('div', { key: c.id, style: { marginTop: 10 } }, button(`${c.pinned ? '★ ' : ''}${c.title}`, () => model.select(agent.id, c.id)))), !agent.conversations.length && h('div', { className: 'notice' }, '还没有演示条目。', ' ', button('去设置里添加', model.home)))), h('footer', { className: 'foot muted' }, '本地交互预览 · 不读取、同步或修改原软件的真实对话。'))
   }
@@ -126,30 +142,41 @@ window.__ModuleLoader__.load({ id: 'dsh-agent-dock', factory(require) {
     ctx.effect(() => {
       const style = document.createElement('style'); style.textContent = css + workspaceCss; document.head.appendChild(style)
       let state = { agents: [], revision: 0, loaded: false, error: '', searching: false, selected: {}, expanded: {}, realSidebars: {}, selectedReal: {}, previewModes: {} }, alive = true, workspaceDispose = null, activeAgentId = null, saving = false
+      let popupTail = Promise.resolve(), popupGeneration = 0
+      const popupRequest = (route, value) => { const result = popupTail.catch(() => {}).then(() => api(`workbuddy/${route}`, 'POST', value)); popupTail = result.catch(() => {}); return result }
+      const hidePopup = () => { if (state.popup?.lease) popupRequest('viewport', { lease: state.popup.lease, visible: false }).catch(() => {}) }
       const realRequests = new Map(), realSources = new Map()
       const listeners = new Set(), entries = new Map(), disposers = []
       const emit = patch => { state = { ...state, ...patch }; listeners.forEach(fn => fn()) }
       const panelKey = id => `${NS}:agent:${id}`
-      const clearWorkspace = () => { workspaceDispose?.(); workspaceDispose = null; activeAgentId = null; emit({}) }
+      const clearWorkspace = () => { hidePopup(); workspaceDispose?.(); workspaceDispose = null; activeAgentId = null; emit({}) }
       const model = {
+        popupActive: lease => alive && state.popup?.lease === lease && ctx.layout.panelInfo?.getSnapshot().activePanelId === panelKey(state.popup.agentId),
+        popupViewport: (value, lease) => popupRequest('viewport', { ...value, lease }),
+        popupError: (error, lease) => { if (alive && state.popup?.lease === lease) emit({ popup: { ...state.popup, error, opened: false, opening: false } }) },
         snapshot: () => state, subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn) },
         conversations: (agent, query = '') => agent.conversations.filter(c => c.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).slice().sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt.localeCompare(a.updatedAt)),
         home: () => { clearWorkspace(); ctx.layout.selectPanel(NS) },
         back: () => { clearWorkspace(); ctx.layout.selectPanel(null) },
         select: (id, conversationId) => { model.showDemo(id); emit({ selected: { ...state.selected, [id]: conversationId } }) },
-        showDemo: id => { if (!state.agents.some(a => a.id === id && a.enabled)) return; emit({ previewModes: { ...state.previewModes, [id]: 'demo' } }); ctx.layout.selectPanel(panelKey(id)); activateWorkspace(id) },
+        showDemo: id => { hidePopup(); if (!state.agents.some(a => a.id === id && a.enabled)) return; emit({ previewModes: { ...state.previewModes, [id]: 'demo' } }); ctx.layout.selectPanel(panelKey(id)); activateWorkspace(id) },
         selectReal: async (id, item) => {
           if (!state.agents.some(a => a.id === id && a.enabled && isWorkBuddy(a)) || state.popup?.opening) return
-          emit({ selectedReal: { ...state.selectedReal, [id]: item }, previewModes: { ...state.previewModes, [id]: 'real' }, popup: item ? { opening: true, error: '' } : null })
+          hidePopup()
+          const generation = ++popupGeneration, lease = uid()
+          emit({ selectedReal: { ...state.selectedReal, [id]: item }, previewModes: { ...state.previewModes, [id]: 'real' }, popup: item ? { opening: true, error: '', lease } : null })
           ctx.layout.selectPanel(panelKey(id)); activateWorkspace(id)
           if (!item) return
           try {
-            const result = await api('workbuddy/open', 'POST', { window: state.realSidebars[id]?.window, ...item })
-            if (alive && state.selectedReal[id] === item) emit({ popup: { opening: false, opened: true, title: result.title, error: '' } })
-          } catch (error) { if (alive && state.selectedReal[id] === item) emit({ popup: { opening: false, opened: false, error: error.message } }) }
+            const result = await popupRequest('open', { window: state.realSidebars[id]?.window, ...item, lease })
+            if (alive && generation === popupGeneration && state.selectedReal[id] === item) {
+              emit({ popup: { opening: false, opened: true, title: result.title, error: '', lease, agentId: id } })
+              if (ctx.layout.panelInfo?.getSnapshot().activePanelId !== panelKey(id)) await popupRequest('viewport', { lease, visible: false })
+            } else await popupRequest('viewport', { lease, visible: false })
+          } catch (error) { if (alive && generation === popupGeneration && state.selectedReal[id] === item) emit({ popup: { opening: false, opened: false, error: error.message, lease } }) }
         },
         toggleWorkspace: id => { const expanded = !state.expanded[id]; emit({ expanded: { ...state.expanded, [id]: expanded } }); if (expanded) return model.refreshReal(id) },
-        openAgent: id => { const agent = state.agents.find(a => a.id === id && a.enabled); if (!agent) return; emit({ previewModes: { ...state.previewModes, [id]: 'real' } }); ctx.layout.selectPanel(panelKey(id)); activateWorkspace(id); if (isWorkBuddy(agent)) return model.refreshReal(id) },
+        openAgent: id => { if (activeAgentId && activeAgentId !== id) hidePopup(); const agent = state.agents.find(a => a.id === id && a.enabled); if (!agent) return; emit({ previewModes: { ...state.previewModes, [id]: 'real' } }); ctx.layout.selectPanel(panelKey(id)); activateWorkspace(id); if (isWorkBuddy(agent)) return model.refreshReal(id) },
         refreshReal: id => {
           const agent = state.agents.find(a => a.id === id && a.enabled && isWorkBuddy(a))
           if (!alive || !agent) return Promise.resolve()
@@ -259,6 +286,7 @@ window.__ModuleLoader__.load({ id: 'dsh-agent-dock', factory(require) {
       disposers.push(ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: NS }, () => h(Manager, { model }))))
       disposers.push(ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: NS, order: 31, label: () => TITLE }, ({ size = 22 }) => h('span', { className: 'adk' }, h(Icon, { value: '✦', size })))))
       disposers.push(ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: NS, order: 60, label: () => TITLE }, () => h('div', { className: 'adk', style: { padding: 24 } }, h('h2', null, TITLE), h('p', { className: 'muted' }, '在管理页设置智能体、演示对话和模拟器。'), button('打开管理页', model.home)))))
+      if (ctx.layout.panelInfo?.subscribe) disposers.push(ctx.layout.panelInfo.subscribe(() => { const id = state.popup?.agentId; if (id && ctx.layout.panelInfo.getSnapshot().activePanelId !== panelKey(id)) hidePopup() }))
       model.reload()
       return () => { alive = false; clearWorkspace(); for (const entry of entries.values()) { entry.side(); entry.main() } disposers.reverse().forEach(dispose => dispose()); style.remove(); listeners.clear() }
     }, 'agent workbench local preview')

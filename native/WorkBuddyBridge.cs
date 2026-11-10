@@ -54,9 +54,13 @@ public static class WorkBuddyBridge {
     static IntPtr MainWindow() {
         var found=new List<IntPtr>();
         EnumWindows((h,p)=>{var b=new StringBuilder(128); GetWindowText(h,b,b.Capacity); if(b.ToString()=="WorkBuddy"&&IsWindowVisible(h)&&Executable(h)) found.Add(h); return true;},IntPtr.Zero);
-        if(found.Count!=1) throw new Exception("需要一个可识别的 WorkBuddy 主窗口；当前找到 "+found.Count+" 个。请打开主窗口后刷新。");
-        if(IsIconic(found[0])) throw new Exception("请先还原 WorkBuddy 主窗口，再刷新真实列表。");
-        return found[0];
+        var sidebars=new List<IntPtr>();
+        foreach(var candidate in found) {
+            if(IsIconic(candidate)) continue;
+            try { int budget=4000; if(Tabs(Root(candidate),0,ref budget)!=null) sidebars.Add(candidate); } catch(COMException) {} catch(Exception) {}
+        }
+        if(sidebars.Count!=1) throw new Exception("需要一个带有侧栏的 WorkBuddy 主窗口；当前识别到 "+sidebars.Count+" 个。请还原目标版本主窗口；若两个版本都有侧栏，请暂时最小化另一个版本后刷新。");
+        return sidebars[0];
     }
     static IAccessible Root(IntPtr h) {
         UIntPtr ignored; SendMessageTimeout(h,0x003D,UIntPtr.Zero,new IntPtr(-4),2,1500,out ignored);
@@ -156,6 +160,7 @@ public static class WorkBuddyBridge {
         // Popup headers expose a title but no documented stable conversation ID.
         if(sameTitle!=1) throw new Exception("当前展开列表存在同名对话，无法可靠核对小窗归属。请在 WorkBuddy 中直接打开。");
         SetForegroundWindow(snapshot.Window);
+        for(int focusWait=0;focusWait<10&&GetForegroundWindow()!=snapshot.Window;focusWait++) Thread.Sleep(30);
         if(GetForegroundWindow()!=snapshot.Window) throw new Exception("无法确认 WorkBuddy 前台焦点，未发送点击。");
         var row=Read(chosen.Row.A,false); var point=new Point {X=row.X+Math.Min(row.W/2,100),Y=row.Y+row.H/2};
         if(row.W<=0||row.H<=0||GetAncestor(WindowFromPoint(point),2)!=snapshot.Window) throw new Exception("目标条目被遮挡，未发送点击。");
@@ -173,7 +178,7 @@ public static class WorkBuddyBridge {
         for(int i=0;i<25;i++) {
             var popups=Popups(snapshot.Window,title);
             if(popups.Count>1) throw new Exception("发现多个同名对话小窗，未选择窗口。");
-            if(popups.Count==1) { uint pid;GetWindowThreadProcessId(popups[0],out pid);return new {ok=true,window=popups[0].ToString(),pid=pid,title=title}; }
+            if(popups.Count==1) { uint pid;GetWindowThreadProcessId(popups[0],out pid);var nativeTitle=new StringBuilder(2048); GetWindowText(popups[0],nativeTitle,nativeTitle.Capacity); return new {ok=true,window=popups[0].ToString(),pid=pid,title=title,windowTitle=nativeTitle.ToString()}; }
             Thread.Sleep(150);
         }
         throw new Exception("已执行原生菜单，但未能核对对应的小窗标题；不报告打开成功。");

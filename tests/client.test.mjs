@@ -31,7 +31,8 @@ async function setup(t, sessionOptions = {}) {
     document: { createElement: element, body: element(), querySelector: selector => { assert.equal(selector, '[data-slot="sidebar.workspaces"]'); return anchor }, head: { appendChild() {} } },
     fetch: async (url, options) => {
       calls.push({ url, method: options.method })
-      assert.ok(['/api/agent-dock/workbench', '/api/agent-dock/workbuddy/sidebar', '/api/agent-dock/workbuddy/open'].includes(url), 'desktop flows must never call Android/launch/native-open routes')
+      assert.ok(['/api/agent-dock/workbench', '/api/agent-dock/workbuddy/sidebar', '/api/agent-dock/workbuddy/open', '/api/agent-dock/workbuddy/viewport'].includes(url), 'desktop flows must never call Android/launch/native-open routes')
+      if (url === '/api/agent-dock/workbuddy/viewport') return { ok: true, json: async () => ({ ok: true }) }
       if (url === '/api/agent-dock/workbuddy/open') {
         assert.equal(options.method, 'POST')
         const request = JSON.parse(options.body)
@@ -53,7 +54,7 @@ async function setup(t, sessionOptions = {}) {
   vm.runInNewContext(await readFile(new URL('../client.js', import.meta.url), 'utf8'), context)
   plugin.apply({
     effect: fn => effects.push(fn()),
-    layout: { selectPanel: id => { selected = id } },
+    layout: { panelInfo: { getSnapshot: () => ({ activePanelId: selected }) }, selectPanel: id => { selected = id } },
     sessions: {
       create: async () => { sessionCalls.push({ kind: 'create' }); if (sessionOptions.createError) throw new Error(sessionOptions.createError); await sessionOptions.wait; return 'search-session' },
       using: async (target, options, operation) => { sessionCalls.push({ kind: 'using', target, options }); return operation({ binding: { session: { prompt: async (content, mode) => { sessionCalls.push({ kind: 'prompt', content, mode }); return sessionOptions.promptResult || { ok: true, value: { accepted: true } } } } } }) },
@@ -76,6 +77,35 @@ function nodes(tree) { return tree && typeof tree === 'object' ? [tree, ...tree.
 function text(tree) { return typeof tree === 'string' || typeof tree === 'number' ? String(tree) : tree?.props?.children.map(text).join('') || '' }
 function click(tree, label) { const node = nodes(tree).find(n => n.type === 'button' && text(n) === label); assert.ok(node, `button ${label}`); return node.props.onClick() }
 function agent(id = 'workbuddy') { return { id, name: 'WorkBuddy', icon: 'W', enabled: true, executable: 'C:\\Example\\WorkBuddy.exe', openMethod: 'official', windowPolicy: 'close', conversations: [{ id: 'demo-one', title: '项目讨论（演示）', pinned: true, updatedAt: '2026-11-09T00:00:00.000Z' }] } }
+
+test('late popup open after returning to DSH is hidden with its own lease', async t => {
+  let finish
+  const app = await setup(t, { open: request => new Promise(resolve => { finish = () => resolve({ ok: true, title: request.title }) }) })
+  await app.model.saveAgent(agent())
+  await app.model.refreshReal('workbuddy')
+  const opening = app.model.selectReal('workbuddy', { key: 'native-one', title: '真实对话', group: '最近' })
+  await new Promise(resolve => setImmediate(resolve))
+  app.model.back()
+  finish(); await opening
+  assert.equal(app.selected(), null)
+  assert.ok(app.calls.some(c => c.url.endsWith('/viewport')))
+  assert.ok(app.model.snapshot().popup.lease)
+})
+
+test('popup activity follows selected panel and ignores errors from an old lease', async t => {
+  const app = await setup(t)
+  await app.model.saveAgent(agent())
+  await app.model.refreshReal('workbuddy')
+  await app.model.selectReal('workbuddy', { key: 'native-one', title: '真实对话', group: '最近' })
+  const lease = app.model.snapshot().popup.lease
+  assert.equal(app.model.popupActive(lease), true)
+  app.model.popupError('old failure', 'old-lease')
+  assert.equal(app.model.snapshot().popup.opened, true)
+  app.model.back()
+  assert.equal(app.model.popupActive(lease), false)
+  app.model.popupError('current failure', lease)
+  assert.equal(app.model.snapshot().popup.error, 'current failure')
+})
 
 test('empty manager, local save/reload, enabled navigation and order stay consistent', async t => {
   const app = await setup(t)
