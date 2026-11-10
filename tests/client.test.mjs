@@ -99,6 +99,12 @@ test('popup activity follows selected panel and ignores errors from an old lease
   await app.model.selectReal('workbuddy', { key: 'native-one', title: '真实对话', group: '最近' })
   const lease = app.model.snapshot().popup.lease
   assert.equal(app.model.popupActive(lease), true)
+  app.model.back()
+  const reads = app.calls.filter(c => c.url.endsWith('/sidebar')).length
+  await app.model.openAgent('workbuddy')
+  assert.equal(app.calls.filter(c => c.url.endsWith('/sidebar')).length, reads)
+  assert.equal(app.model.snapshot().selectedReal.workbuddy.title, '真实对话')
+  assert.equal(app.model.popupActive(lease), true)
   app.model.popupError('old failure', 'old-lease')
   assert.equal(app.model.snapshot().popup.opened, true)
   app.model.back()

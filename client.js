@@ -176,7 +176,7 @@ window.__ModuleLoader__.load({ id: 'dsh-agent-dock', factory(require) {
           } catch (error) { if (alive && generation === popupGeneration && state.selectedReal[id] === item) emit({ popup: { opening: false, opened: false, error: error.message, lease } }) }
         },
         toggleWorkspace: id => { const expanded = !state.expanded[id]; emit({ expanded: { ...state.expanded, [id]: expanded } }); if (expanded) return model.refreshReal(id) },
-        openAgent: id => { if (activeAgentId && activeAgentId !== id) hidePopup(); const agent = state.agents.find(a => a.id === id && a.enabled); if (!agent) return; emit({ previewModes: { ...state.previewModes, [id]: 'real' } }); ctx.layout.selectPanel(panelKey(id)); activateWorkspace(id); if (isWorkBuddy(agent)) return model.refreshReal(id) },
+        openAgent: id => { if (activeAgentId && activeAgentId !== id) hidePopup(); const agent = state.agents.find(a => a.id === id && a.enabled); if (!agent) return; emit({ previewModes: { ...state.previewModes, [id]: 'real' } }); ctx.layout.selectPanel(panelKey(id)); activateWorkspace(id); if (isWorkBuddy(agent) && !(state.popup?.opened && state.popup.agentId === id)) return model.refreshReal(id) },
         refreshReal: id => {
           const agent = state.agents.find(a => a.id === id && a.enabled && isWorkBuddy(a))
           if (!alive || !agent) return Promise.resolve()
