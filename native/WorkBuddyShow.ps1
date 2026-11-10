@@ -29,13 +29,13 @@ public static class WorkBuddyShow {
  static bool IsMain(IntPtr h){try{Guid g=new Guid("618736e0-3c3d-11cf-810c-00aa00389b71");IAccessible a;int budget=2000;return AccessibleObjectFromWindow(h,0xFFFFFFFC,ref g,out a)==0&&a!=null&&MainStructure(a,0,ref budget);}catch{return false;}}
  public static object Show(){
  SetThreadDpiAwarenessContext(new IntPtr(-4));var found=new List<IntPtr>();
- EnumWindows((h,p)=>{var b=new StringBuilder(512);GetWindowText(h,b,b.Capacity);if(IsWindowVisible(h)&&b.ToString()=="WorkBuddy"&&Exe(h))found.Add(h);return true;},IntPtr.Zero);
+ EnumWindows((h,p)=>{var b=new StringBuilder(512);GetWindowText(h,b,b.Capacity);if(b.ToString()=="WorkBuddy"&&Exe(h))found.Add(h);return true;},IntPtr.Zero);
  if(found.Count>1){var mains=found.FindAll(h=>IsMain(h));if(mains.Count==1)found=mains;else throw new Exception("发现多个 WorkBuddy 窗口，无法确认唯一主窗口。请关闭额外独立对话窗后重试。");}
  if(found.Count!=1)throw new Exception("请先手动启动并打开 WorkBuddy 主窗口。");
  var target=found[0];var monitor=new Monitor();monitor.Size=Marshal.SizeOf(monitor);if(!GetMonitorInfo(MonitorFromWindow(GetForegroundWindow(),2),ref monitor))throw new Exception("无法确认显示器可用区域。");
  var area=monitor.Work;int aw=area.R-area.L,ah=area.B-area.T;int w=Math.Min(1440,(int)(aw*0.88)),height=Math.Min(1000,(int)(ah*0.9));int x=area.L+(aw-w)/2,y=area.T+(ah-height)/2;
- ShowWindowAsync(target,9);for(int i=0;i<20&&IsIconic(target);i++)System.Threading.Thread.Sleep(50);
- if(!Exe(target)||IsIconic(target))throw new Exception("无法还原 WorkBuddy 窗口。");
+ ShowWindowAsync(target,9);for(int i=0;i<20&&(IsIconic(target)||!IsWindowVisible(target));i++)System.Threading.Thread.Sleep(50);
+ if(!Exe(target)||IsIconic(target)||!IsWindowVisible(target))throw new Exception("无法从托盘或最小化状态还原 WorkBuddy 窗口。");
  if(!SetWindowPos(target,IntPtr.Zero,x,y,w,height,0x210))throw new Exception("无法设置 WorkBuddy 窗口位置。");
  SetForegroundWindow(target);Rect actual;if(!GetWindowRect(target,out actual)||!IsWindowVisible(target))throw new Exception("无法确认 WorkBuddy 窗口已显示。");
  if(actual.L<area.L||actual.T<area.T||actual.R>area.R||actual.B>area.B)throw new Exception("WorkBuddy 最小尺寸超过当前显示器可用区域。");
