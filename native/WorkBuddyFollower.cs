@@ -94,7 +94,7 @@ public static class WorkBuddyFollower {
     changed=true;
     if(!SetWindowPos(target.Window,IntPtr.Zero,r.Left,r.Top,r.Width,r.Height,NOACTIVATE|NOOWNERZORDER|(zorder?0:NOZORDER))) throw new Win32Exception(Marshal.GetLastWin32Error(),"SetWindowPos failed");
     RECT after=Bounds(target.Window);
-    if(after.Left!=r.Left||after.Top!=r.Top||after.Width!=r.Width||after.Height!=r.Height) throw new Exception("SetWindowPos rectangle postcondition failed (window minimum size or DPI mismatch)");
+    if(after.Left!=r.Left||after.Top!=r.Top||after.Width!=r.Width||after.Height!=r.Height) throw new Exception("小窗无法适配当前区域：请求 "+r.Width+"×"+r.Height+"，实际 "+after.Width+"×"+after.Height+"。请放大 DSH 窗口后重新打开。");
   }
   static void Park() {
     if(target==null) return;
@@ -210,6 +210,20 @@ public static class WorkBuddyFollower {
       var r=v.GetProperty("rect"); var s=v.GetProperty("screen");
       var next=new View{X=Number(r,"x"),Y=Number(r,"y"),W=Number(r,"width"),H=Number(r,"height"),Dpr=Number(v,"devicePixelRatio"),Visible=v.GetProperty("visible").GetBoolean(),SX=Number(s,"x"),SY=Number(s,"y"),SW=Number(s,"width"),SH=Number(s,"height"),IW=Number(s,"innerWidth"),IH=Number(s,"innerHeight")};
       if(next.Dpr<0.5||next.Dpr>4||next.W<1||next.H<1||next.IW<1||next.IH<1||next.SW<1||next.SH<1||next.X<0||next.Y<0||next.X+next.W>next.IW+1||next.Y+next.H>next.IH+1) throw new Exception("Viewport is outside verified browser client area");
+      // A minimized host is intentionally excluded by ResolveHost. Keep the
+      // verified attachment hidden instead of restoring a visible independent popup.
+      if(host!=null&&host.Alive()&&(IsIconic(host.Window)||!IsWindowVisible(host.Window))) {
+        view=next; Visibility(false); return new {attached=true,visible=false,window=target.Window.ToInt64().ToString()};
+      }
+      if(host!=null&&host.Alive()) {
+        RECT current=Bounds(host.Window); double scale=GetDpiForWindow(host.Window)/96.0,tol=18*scale;
+        if(Math.Abs(current.Left-next.SX*scale)>tol||Math.Abs(current.Top-next.SY*scale)>tol||Math.Abs(current.Width-next.SW*scale)>tol||Math.Abs(current.Height-next.SH*scale)>tol) {
+          // Native events must not reapply the previous visible rectangle while
+          // waiting for the browser to provide current geometry.
+          if(view!=null) view.Visible=false;
+          Visibility(false); return new {attached=true,visible=false,window=target.Window.ToInt64().ToString()};
+        }
+      }
       ResolveHost(next);
       // After the user-requested popup open, return focus to the verified DSH host
       // once, only while that exact popup is still foreground. Never steal from other apps.

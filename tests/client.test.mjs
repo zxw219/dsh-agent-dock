@@ -122,6 +122,10 @@ test('native viewport remains active when Chromium reports occlusion; panel leav
   const main = app.slots.find(s => s.meta.key === app.selected()).render()
   const root = app.render(main.type, main.props).tree
   const preview = app.render(root.type, root.props).tree
+  assert.equal(preview.props.style.height, '100%', 'native preview must fill its parent even when root page CSS does not apply')
+  assert.equal(preview.props.style.padding, 16)
+  assert.equal(nodes(preview).some(n => n.props?.['data-agent-dock'] === 'real-selection'), false, 'opened popup must receive the height previously occupied by selection details')
+  assert.equal(text(preview).includes('查看本地演示'), false, 'help controls must not shrink the native viewport while it is open')
   const component = nodes(preview).find(n => n.type?.name === 'PopupViewport')
   assert.ok(component)
   const model = { ...app.model, popupViewport: async value => sent.push(value) }
