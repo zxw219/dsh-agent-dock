@@ -6,7 +6,8 @@ const script = fileURLToPath(new URL('./native/WorkBuddyBridge.ps1', import.meta
 
 // PowerShell 7 is intentional: the installed desktop app exposed its Chromium
 // accessibility tree to this host during validation, but not to our Framework exe.
-function runBridge(operation, request, { command = process.env.DSH_PWSH_PATH || 'pwsh.exe', timeout = 20000 } = {}) {
+function runBridge(operation, request, { command = process.env.DSH_PWSH_PATH || 'pwsh.exe', timeout = 20000, worker } = {}) {
+  if (worker) return worker.run(operation, request)
   return new Promise((resolve, reject) => {
     const child = spawn(command, ['-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-File', script, '-Operation', operation], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
     child.stdin.on('error', () => {})

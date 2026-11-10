@@ -3,7 +3,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import registerWorkbench from './workbench.js'
-import registerWorkBuddy, { registerPopup } from './workbuddy.js'
+import registerWorkBuddy, { registerPopup, readSidebar, openConversation } from './workbuddy.js'
+import { createBridgeWorker } from './bridge-worker.js'
 import { createFollower } from './follower.js'
 
 export const name = 'dsh-agent-dock'
@@ -162,7 +163,8 @@ export function apply(ctx) {
     const guard = (req, res) => { const rejection = ctx.connection.requestRejection(req); if (rejection !== undefined) { json(res, rejection, { error: 'Access denied' }); return false } return true }
     const follower = createFollower({ powershell: process.env.DSH_PWSH_PATH || 'pwsh.exe' })
     let popupLease = null
-    const routes = [registerWorkbench(ctx), registerWorkBuddy(ctx), registerPopup(ctx, { attached: async (result, request) => { popupLease = null; await follower.attach({ window: result.window, pid: result.pid, title: result.windowTitle }); popupLease = request.lease; } })]
+    const reader = createBridgeWorker()
+    const routes = [registerWorkbench(ctx), registerWorkBuddy(ctx, { read: () => readSidebar({ worker: reader }) }), registerPopup(ctx, { open: request => openConversation(request, { worker: reader }), attached: async (result, request) => { popupLease = null; await follower.attach({ window: result.window, pid: result.pid, title: result.windowTitle }); popupLease = request.lease; } })]
     routes.push(ctx.webServer.register({ kind: 'exact', path: '/api/agent-dock/workbuddy-icon', handler: async (req, res) => { if (!guard(req, res)) return; if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' }); try { json(res, 200, await readFile(path.join(root, 'workbuddy.svg')), 'image/svg+xml') } catch { json(res, 500, { error: 'Icon unavailable' }) } } }))
     const register = (route, method, handler) => routes.push(ctx.webServer.register({ kind: 'exact', path: `/api/agent-dock/${route}`, handler: async (req, res) => { if (!guard(req, res)) return; if (req.method !== method) return json(res, 405, { error: 'Method not allowed' }); try { await handler(req, res) } catch (e) { json(res, 400, { ok: false, error: e.message }) } } }))
     register('workbuddy/viewport', 'POST', async (req, res) => { const value = await body(req); if (!popupLease || value.lease !== popupLease) return json(res, 200, { ok: true, stale: true }); json(res, 200, { ok: true, ...await follower.viewport(value) }) })
@@ -180,6 +182,6 @@ export function apply(ctx) {
       const saved = { ...c, version: 2, activeDeviceId: device.id, devices: [device], agents: c.agents || [] }
       await saveConfig(saved); configPromise = Promise.resolve(saved); json(res, 200, { ok: true, device })
     })
-    return async () => { routes.forEach(dispose => dispose()); await follower.dispose() }
+    return async () => { routes.forEach(dispose => dispose()); await reader.dispose(); await follower.dispose() }
   }, 'android emulator control dock')
 }
