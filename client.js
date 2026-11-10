@@ -164,7 +164,7 @@ window.__ModuleLoader__.load({ id: 'dsh-agent-dock', factory(require) {
           if (!state.agents.some(a => a.id === id && a.enabled && isWorkBuddy(a)) || state.popup?.opening) return
           hidePopup()
           const generation = ++popupGeneration, lease = uid()
-          emit({ selectedReal: { ...state.selectedReal, [id]: item }, previewModes: { ...state.previewModes, [id]: 'real' }, popup: item ? { opening: true, error: '', lease } : null })
+          emit({ selectedReal: { ...state.selectedReal, [id]: item }, previewModes: { ...state.previewModes, [id]: 'real' }, popup: item ? { opening: true, error: '', lease, agentId: id } : null })
           ctx.layout.selectPanel(panelKey(id)); activateWorkspace(id)
           if (!item) return
           try {
@@ -189,9 +189,9 @@ window.__ModuleLoader__.load({ id: 'dsh-agent-dock', factory(require) {
               const data = await api('workbuddy/sidebar')
               if (!valid()) return
               if (data.ok !== true || data.connected !== true || data.scope !== 'visible-sidebar' || typeof data.window !== 'string' || typeof data.fetchedAt !== 'string' || !Array.isArray(data.groups) || data.groups.some(g => typeof g.name !== 'string' || !Array.isArray(g.conversations) || g.conversations.some(c => typeof c.key !== 'string' || typeof c.title !== 'string'))) throw new Error('真实侧栏返回格式无效或尚未连接。')
-              emit({ realSidebars: { ...state.realSidebars, [id]: { connected: true, loading: false, error: '', window: data.window, scope: data.scope, fetchedAt: data.fetchedAt, groups: data.groups.map(g => ({ name: g.name, conversations: g.conversations.map(c => ({ key: c.key, title: c.title })) })) } }, selectedReal: { ...state.selectedReal, [id]: null } })
+              emit({ realSidebars: { ...state.realSidebars, [id]: { connected: true, loading: false, error: '', window: data.window, scope: data.scope, fetchedAt: data.fetchedAt, groups: data.groups.map(g => ({ name: g.name, conversations: g.conversations.map(c => ({ key: c.key, title: c.title })) })) } }, selectedReal: { ...state.selectedReal, [id]: (state.popup?.opened || state.popup?.opening) && state.popup.agentId === id ? state.selectedReal[id] : null } })
             } catch (error) {
-              if (valid()) emit({ realSidebars: { ...state.realSidebars, [id]: { connected: false, loading: false, error: error.message, groups: [] } }, selectedReal: { ...state.selectedReal, [id]: null } })
+              if (valid()) emit({ realSidebars: { ...state.realSidebars, [id]: { connected: false, loading: false, error: error.message, groups: [] } }, selectedReal: { ...state.selectedReal, [id]: (state.popup?.opened || state.popup?.opening) && state.popup.agentId === id ? state.selectedReal[id] : null } })
             } finally {
               if (realRequests.get(id) === request) { realRequests.delete(id); if (alive && state.realSidebars[id]?.loading) emit({ realSidebars: { ...state.realSidebars, [id]: { connected: false, loading: false, error: '', groups: [] } } }) }
             }

@@ -78,6 +78,24 @@ function text(tree) { return typeof tree === 'string' || typeof tree === 'number
 function click(tree, label) { const node = nodes(tree).find(n => n.type === 'button' && text(n) === label); assert.ok(node, `button ${label}`); return node.props.onClick() }
 function agent(id = 'workbuddy') { return { id, name: 'WorkBuddy', icon: 'W', enabled: true, executable: 'C:\\Example\\WorkBuddy.exe', openMethod: 'official', windowPolicy: 'close', conversations: [{ id: 'demo-one', title: '项目讨论（演示）', pinned: true, updatedAt: '2026-11-09T00:00:00.000Z' }] } }
 
+test('sidebar refresh preserves the selected attached conversation on success and failure', async t => {
+  let fail = false
+  const app = await setup(t, { sidebar: async () => fail ? { error: 'Main window minimized' } : { ok: true, connected: true, window: '123', scope: 'visible-sidebar', groups: [{ name: '最近', conversations: [{ key: 'native-one', title: '真实对话' }] }], fetchedAt: '2026-11-09T00:00:00Z' } })
+  await app.model.saveAgent(agent())
+  await app.model.refreshReal('workbuddy')
+  const item = { key: 'native-one', title: '真实对话', group: '最近' }
+  await app.model.selectReal('workbuddy', item)
+  const lease = app.model.snapshot().popup.lease
+  await app.model.refreshReal('workbuddy')
+  assert.equal(app.model.snapshot().selectedReal.workbuddy, item)
+  fail = true
+  await app.model.refreshReal('workbuddy')
+  assert.equal(app.model.snapshot().selectedReal.workbuddy, item)
+  assert.equal(app.model.snapshot().popup.lease, lease)
+  assert.equal(app.model.popupActive(lease), true)
+  assert.equal(app.model.snapshot().realSidebars.workbuddy.connected, false)
+})
+
 test('late popup open after returning to DSH is hidden with its own lease', async t => {
   let finish
   const app = await setup(t, { open: request => new Promise(resolve => { finish = () => resolve({ ok: true, title: request.title }) }) })
@@ -85,6 +103,8 @@ test('late popup open after returning to DSH is hidden with its own lease', asyn
   await app.model.refreshReal('workbuddy')
   const opening = app.model.selectReal('workbuddy', { key: 'native-one', title: '真实对话', group: '最近' })
   await new Promise(resolve => setImmediate(resolve))
+  await app.model.refreshReal('workbuddy')
+  assert.equal(app.model.snapshot().selectedReal.workbuddy.title, '真实对话')
   app.model.back()
   finish(); await opening
   assert.equal(app.selected(), null)
