@@ -17,6 +17,7 @@ public static class WorkBuddyBridge {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder b, int n);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr h, int command);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
@@ -59,7 +60,25 @@ public static class WorkBuddyBridge {
             if(IsIconic(candidate)) continue;
             try { int budget=4000; if(Tabs(Root(candidate),0,ref budget)!=null) sidebars.Add(candidate); } catch(COMException) {} catch(Exception) {}
         }
-        if(sidebars.Count!=1) throw new Exception("需要一个带有侧栏的 WorkBuddy 主窗口；当前识别到 "+sidebars.Count+" 个。请还原目标版本主窗口；若两个版本都有侧栏，请暂时最小化另一个版本后刷新。");
+        // This reader runs only on an explicit user action. A minimized process
+        // is running, but Chromium cannot expose usable sidebar geometry yet.
+        // Restore only a unique candidate, then verify its actual sidebar.
+        if(sidebars.Count==0&&found.Count==1&&IsIconic(found[0])) {
+            IntPtr candidate=found[0];
+            if(!ShowWindowAsync(candidate,9)) throw new Exception("已找到 WorkBuddy，但无法还原最小化窗口。请手动还原主窗口后刷新。");
+            for(int attempt=0;attempt<20;attempt++) {
+                Thread.Sleep(100);
+                if(!IsWindowVisible(candidate)||IsIconic(candidate)||!Executable(candidate)) continue;
+                try { int budget=4000; if(Tabs(Root(candidate),0,ref budget)!=null) { sidebars.Add(candidate); break; } } catch(COMException) {} catch(Exception) {}
+            }
+            if(sidebars.Count==0) throw new Exception("已还原 WorkBuddy，但侧栏尚未就绪。请展开主窗口侧栏后刷新。");
+        }
+        if(sidebars.Count==0) {
+            if(found.Count==0) throw new Exception("未找到可见的 WorkBuddy 窗口。请从任务栏或托盘打开主窗口后刷新。");
+            if(found.Count>1) throw new Exception("已找到多个 WorkBuddy 窗口，但无法确认唯一侧栏。请还原目标主窗口并展开侧栏后刷新。");
+            throw new Exception("WorkBuddy 正在运行，但未找到可读取的侧栏。请展开主窗口侧栏后刷新。");
+        }
+        if(sidebars.Count!=1) throw new Exception("发现 "+sidebars.Count+" 个 WorkBuddy 主窗口侧栏。请暂时最小化其他版本，保留目标版本后刷新。");
         return sidebars[0];
     }
     static IAccessible Root(IntPtr h) {
