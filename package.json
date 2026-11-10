@@ -4,9 +4,9 @@
   "private": true,
   "description": "Agent workbench interaction preview with Android emulator fallback for DSH",
   "type": "module",
-  "scripts": { "test": "node --test tests/client.test.mjs tests/workbench.test.mjs" },
+  "scripts": { "test": "node --test tests/*.test.mjs" },
   "exports": { ".": "./index.js", "./client": "./client.js", "./locale/*.json": "./locale/*.json", "./icon": "./icon.svg" },
-  "files": ["index.js", "workbench.js", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg", "workbuddy.svg", "README.md"],
+  "files": ["index.js", "workbench.js", "workbuddy.js", "native/WorkBuddyBridge.cs", "native/WorkBuddyBridge.ps1", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg", "workbuddy.svg", "README.md"],
   "dsh": {
     "manifestVersion": 1,
     "bundle": { "patch": "./cordis.patch.yml" },

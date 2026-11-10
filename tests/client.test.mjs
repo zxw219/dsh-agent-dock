@@ -31,7 +31,12 @@ async function setup(t, sessionOptions = {}) {
     document: { createElement: element, body: element(), querySelector: selector => { assert.equal(selector, '[data-slot="sidebar.workspaces"]'); return anchor }, head: { appendChild() {} } },
     fetch: async (url, options) => {
       calls.push({ url, method: options.method })
-      assert.equal(url, '/api/agent-dock/workbench', 'desktop flows must never call Android/software routes')
+      assert.ok(['/api/agent-dock/workbench', '/api/agent-dock/workbuddy/sidebar'].includes(url), 'desktop flows must never call Android/launch/native-open routes')
+      if (url === '/api/agent-dock/workbuddy/sidebar') {
+        assert.equal(options.method, 'GET')
+        const value = sessionOptions.sidebar ? await sessionOptions.sidebar() : { ok: true, connected: true, window: 'WorkBuddy', scope: 'visible-sidebar', groups: [{ name: '最近', conversations: [{ key: 'native-one', title: '真实对话' }] }], fetchedAt: '2026-11-09T00:00:00Z' }
+        return { ok: !value.error, status: value.error ? 503 : 200, json: async () => value }
+      }
       try {
         const value = options.method === 'PUT' ? await store.put(JSON.parse(options.body)) : await store.get()
         return { ok: true, json: async () => JSON.parse(JSON.stringify(value)) }
@@ -59,7 +64,7 @@ async function setup(t, sessionOptions = {}) {
   const { model } = home.render().props
   await model.reload()
   const render = (component, props, reset = true) => { if (reset) hooks = []; cursor = 0; pendingEffects = []; const tree = component(props); return { tree, effects: () => pendingEffects.map(fn => fn()) } }
-  return { slots, calls, sessionCalls, model, store, home, render, dom, selected: () => selected }
+  return { slots, calls, sessionCalls, model, store, home, render, dom, dispose: () => effects.splice(0).reverse().forEach(fn => fn?.()), selected: () => selected }
 }
 function nodes(tree) { return tree && typeof tree === 'object' ? [tree, ...tree.props.children.flatMap(nodes)] : [] }
 function text(tree) { return typeof tree === 'string' || typeof tree === 'number' ? String(tree) : tree?.props?.children.map(text).join('') || '' }
@@ -235,6 +240,103 @@ test('search creation and submission failures show errors without automatic retr
     assert.equal(app.selected(), 'dsh-agent-dock')
     assert.equal(app.sessionCalls.filter(c => c.kind === 'create').length, 1)
     assert.equal(app.sessionCalls.filter(c => c.kind === 'prompt').length, options.createError ? 0 : 1)
+  }
+})
+
+test('real WorkBuddy reads require explicit actions; groups and duplicate titles use native keys without persistence', async t => {
+  const native = { ok: true, connected: true, window: 'WorkBuddy actual', scope: 'visible-sidebar', fetchedAt: '2026-11-09T02:00:00Z', groups: [{ name: '项目', conversations: [{ key: 'first', title: '同名' }, { key: 'second', title: '同名' }] }, { name: '最近', conversations: [{ key: 'third', title: '其他' }] }] }
+  const app = await setup(t, { sidebar: async () => native })
+  await app.model.saveAgent(agent())
+  await app.model.saveAgent({ ...agent('kimi'), name: 'Kimi', executable: '' })
+  await app.model.reload()
+  const reads = () => app.calls.filter(c => c.url.endsWith('/workbuddy/sidebar')).length
+  assert.equal(reads(), 0, 'mount, save and reload do not read software')
+  app.model.openAgent('kimi')
+  await app.model.toggleWorkspace('kimi')
+  assert.equal(reads(), 0, 'other agents do not read WorkBuddy')
+  const before = JSON.stringify(await app.store.get())
+  await app.model.openAgent('workbuddy')
+  assert.equal(reads(), 1)
+  assert.equal(app.model.snapshot().realSidebars.workbuddy.connected, true)
+  const root = app.slots.find(s => s.meta.key === app.selected()).render()
+  const previewElement = app.render(root.type, root.props).tree
+  const preview = app.render(previewElement.type, previewElement.props).tree
+  assert.match(text(preview), /尚未打开|原生小窗打开与跟随/)
+  const list = nodes(preview).find(n => n.props['data-agent-dock'] === undefined && typeof n.type === 'function' && n.type.name === 'RealSidebarList')
+  const tree = app.render(list.type, list.props).tree
+  assert.match(text(tree), /仅原软件当前展开且可见的列表/)
+  assert.match(text(tree), /项目.*同名同名.*最近.*其他/)
+  const duplicates = nodes(tree).filter(n => n.type === 'button' && text(n) === '同名')
+  assert.deepEqual(duplicates.map(n => n.props.key), ['first', 'second'])
+  duplicates[1].props.onClick()
+  assert.equal(app.model.snapshot().selectedReal.workbuddy.key, 'second')
+  assert.equal(app.model.snapshot().selectedReal.workbuddy.group, '项目')
+  assert.equal(reads(), 1, 'selecting metadata does not open or reread software')
+  assert.equal(JSON.stringify(await app.store.get()), before)
+  assert.equal(app.model.snapshot().agents[0].conversations[0].id, 'demo-one')
+  app.model.showDemo('workbuddy')
+  assert.equal(app.model.snapshot().previewModes.workbuddy, 'demo')
+  assert.equal(reads(), 1)
+  await app.model.toggleWorkspace('workbuddy') // collapse
+  assert.equal(reads(), 1)
+  await app.model.toggleWorkspace('workbuddy') // explicit expand
+  assert.equal(reads(), 2)
+  await click(tree, '刷新真实列表')
+  assert.equal(reads(), 3, 'preview refresh button explicitly reads again')
+  const manager = app.home.render()
+  await click(app.render(manager.type, manager.props).tree, '刷新真实列表')
+  assert.equal(reads(), 4, 'manager refresh button explicitly reads again')
+  assert.equal(JSON.stringify(await app.store.get()), before)
+})
+
+test('real reads coalesce, failure clears health and explicit refresh recovers', async t => {
+  let release, fail = false
+  const wait = new Promise(resolve => { release = resolve })
+  const app = await setup(t, { sidebar: async () => { await wait; return fail ? { error: 'WorkBuddy window unavailable' } : { ok: true, connected: true, window: 'WorkBuddy', scope: 'visible-sidebar', groups: [], fetchedAt: 'now' } } })
+  await app.model.saveAgent(agent())
+  const first = app.model.openAgent('workbuddy'), second = app.model.refreshReal('workbuddy')
+  assert.equal(first, second)
+  assert.equal(app.calls.filter(c => c.url.endsWith('/workbuddy/sidebar')).length, 1)
+  assert.equal(app.model.snapshot().realSidebars.workbuddy.loading, true)
+  release(); await first
+  const manager = app.home.render()
+  let icon = nodes(app.render(manager.type, manager.props).tree).find(n => typeof n.type === 'function' && n.type.name === 'Icon' && n.props.value.includes('workbuddy-icon'))
+  assert.equal(app.render(icon.type, icon.props).tree.props.style.filter, undefined)
+  fail = true
+  await app.model.refreshReal('workbuddy')
+  const failed = app.model.snapshot().realSidebars.workbuddy
+  assert.equal(failed.connected, false)
+  assert.equal(failed.groups.length, 0)
+  assert.match(failed.error, /window unavailable/)
+  icon = nodes(app.render(manager.type, manager.props).tree).find(n => typeof n.type === 'function' && n.type.name === 'Icon' && n.props.value.includes('workbuddy-icon'))
+  assert.equal(app.render(icon.type, icon.props).tree.props.style.filter, 'grayscale(1)')
+  fail = false
+  await app.model.refreshReal('workbuddy')
+  assert.equal(app.model.snapshot().realSidebars.workbuddy.connected, true)
+})
+
+test('unverified or wrong-scope native responses cannot mark WorkBuddy connected', async t => {
+  for (const patch of [{ connected: false }, { scope: 'full-history' }, { groups: [{ name: 'invalid', conversations: [{ title: 'missing key' }] }] }]) {
+    const app = await setup(t, { sidebar: async () => ({ ok: true, connected: true, window: 'WorkBuddy', scope: 'visible-sidebar', groups: [], fetchedAt: 'now', ...patch }) })
+    await app.model.saveAgent(agent())
+    await app.model.openAgent('workbuddy')
+    assert.equal(app.model.snapshot().realSidebars.workbuddy.connected, false)
+    assert.match(app.model.snapshot().realSidebars.workbuddy.error, /格式无效或尚未连接/)
+  }
+})
+
+test('real reads ignore results after removal or disposal', async t => {
+  for (const dispose of [false, true]) {
+    let release
+    const wait = new Promise(resolve => { release = resolve })
+    const app = await setup(t, { sidebar: async () => { await wait; return { ok: true, connected: true, window: 'WorkBuddy', scope: 'visible-sidebar', groups: [], fetchedAt: 'now' } } })
+    await app.model.saveAgent(agent())
+    const pending = app.model.openAgent('workbuddy')
+    if (dispose) app.dispose(); else await app.model.removeAgent('workbuddy')
+    const before = JSON.stringify(app.model.snapshot())
+    release(); await pending
+    assert.equal(JSON.stringify(app.model.snapshot()), before)
+    assert.notEqual(app.model.snapshot().realSidebars.workbuddy?.connected, true)
   }
 })
 
