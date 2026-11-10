@@ -1,0 +1,24 @@
+# Local configuration, conversation titles and runtime data
+/data/
+/node_modules/
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+*.tgz
+*.exe
+*.dll
+*.pdb
+# Local coordination note from an obsolete prototype
+/CLIENT-CONTRACTS.md
+# Local captures and device data
+/screenshots/
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.avd/
+/local.properties
+.DS_Store
+Thumbs.db

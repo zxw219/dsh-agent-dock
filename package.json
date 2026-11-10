@@ -1,0 +1,15 @@
+{
+  "name": "dsh-agent-dock",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent workbench interaction preview with Android emulator fallback for DSH",
+  "type": "module",
+  "scripts": { "test": "node --test tests/client.test.mjs tests/workbench.test.mjs" },
+  "exports": { ".": "./index.js", "./client": "./client.js", "./locale/*.json": "./locale/*.json", "./icon": "./icon.svg" },
+  "files": ["index.js", "workbench.js", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg", "workbuddy.svg", "README.md"],
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "platform": "web", "immediately": true, "inject": ["@deepseek-ai/dsh-client-ui-renderer", "@deepseek-ai/dsh-client-ui-layout", "@deepseek-ai/dsh-client-ui-sidebar", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-api-session-controller", "@deepseek-ai/dsh-client-ui-workspace"] }
+  }
+}
